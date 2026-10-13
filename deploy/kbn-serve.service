@@ -1,0 +1,22 @@
+# Phone companion of kbn. Install with:
+#   mkdir -p ~/.config/systemd/user ~/.config/kbn ~/.local/share/kbn && cp deploy/kbn-serve.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now kbn-serve
+#   journalctl --user -u kbn-serve -f        # logs (the first start prints the access token)
+#
+# It listens on loopback only; `tailscale serve` publishes it to your tailnet over HTTPS.
+[Unit]
+Description=kbn phone companion
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/kbn serve -addr 127.0.0.1:8787
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/kbn %h/.config/kbn
+
+[Install]
+WantedBy=default.target
