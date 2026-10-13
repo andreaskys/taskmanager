@@ -67,8 +67,9 @@ func (s *Store) doneAtFor(columnID int64, current string) string {
 
 // AddCardWith creates a card at the end of its column, keeping every field of c.
 func (s *Store) AddCardWith(c Card) (Card, error) {
-	c.Title = strings.TrimSpace(c.Title)
-	c.Project = strings.TrimSpace(c.Project)
+	if err := cleanCard(&c); err != nil {
+		return Card{}, err
+	}
 	if c.Title == "" {
 		return Card{}, fmt.Errorf("title is empty")
 	}
@@ -93,6 +94,9 @@ func (s *Store) AddCard(columnID int64, project, title string) (Card, error) {
 
 // UpdateCard saves project, title, description, priority, due date, tags and focus.
 func (s *Store) UpdateCard(c Card) error {
+	if err := cleanCard(&c); err != nil {
+		return err
+	}
 	_, err := s.db.Exec(`UPDATE cards SET project=?, title=?, description=?, priority=?, due=?, tags=?, focus=? WHERE id=?`,
 		c.Project, c.Title, c.Description, c.Priority, c.Due, c.Tags, c.Focus, c.ID)
 	return err
@@ -371,4 +375,19 @@ func (s *Store) CardByID(id int64) (DueCard, bool) {
 		return DueCard{}, false
 	}
 	return list[0], true
+}
+
+// cleanCard makes the free-text fields of a card safe and checks their size.
+func cleanCard(c *Card) error {
+	c.Title, c.Project, c.Tags = CleanLine(c.Title), CleanLine(c.Project), CleanLine(c.Tags)
+	c.Description = CleanText(c.Description)
+	for _, f := range []struct {
+		what, v string
+		max     int
+	}{{"title", c.Title, MaxLine}, {"project", c.Project, MaxLine}, {"tags", c.Tags, MaxLine}, {"description", c.Description, MaxText}} {
+		if err := tooLong(f.what, f.v, f.max); err != nil {
+			return err
+		}
+	}
+	return nil
 }

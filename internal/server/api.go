@@ -1,6 +1,7 @@
 package server
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -69,7 +70,19 @@ func pathID(r *http.Request) (int64, bool) {
 	return id, err == nil && id > 0
 }
 
+func mustDate(s string) time.Time { t, _ := time.Parse("2006-01-02", s); return t }
+
 func validDate(s string) bool { _, err := time.Parse("2006-01-02", s); return err == nil }
+
+// storeErr answers 400 for a refused input (too long) and 500 for anything else.
+func (s *Server) storeErr(w http.ResponseWriter, err error) {
+	var le *store.LimitError
+	if errors.As(err, &le) {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.fail(w, err)
+}
 
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	writeErr(w, http.StatusInternalServerError, err.Error())
@@ -278,7 +291,7 @@ func (s *Server) patchCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.UpdateCard(c); err != nil {
-		s.fail(w, err)
+		s.storeErr(w, err)
 		return
 	}
 	writeJSON(w, 200, toCard(c))
@@ -350,14 +363,25 @@ type noteIn struct {
 	Due    string `json:"due"`
 }
 
+// check validates what the store cannot: the color index and the reminder date.
+func (in noteIn) check() error {
+	if in.Color != nil && (*in.Color < 0 || *in.Color > store.MaxColor) {
+		return fmt.Errorf("color must be 0..%d", store.MaxColor)
+	}
+	if in.Due != "" && !validDate(in.Due) {
+		return fmt.Errorf("due must be YYYY-MM-DD")
+	}
+	return nil
+}
+
 func (s *Server) createNote(w http.ResponseWriter, r *http.Request) {
 	var in noteIn
 	if err := decode(r, &in); err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if in.Due != "" && !validDate(in.Due) {
-		writeErr(w, 400, "due must be YYYY-MM-DD")
+	if err := in.check(); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	n := store.Note{Title: in.Title, Tags: in.Tags, Body: in.Body}
@@ -406,8 +430,8 @@ func (s *Server) updateNote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if in.Due != "" && !validDate(in.Due) {
-		writeErr(w, 400, "due must be YYYY-MM-DD")
+	if err := in.check(); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	n.Title, n.Tags, n.Body, n.Due = in.Title, in.Tags, in.Body, in.Due
@@ -493,7 +517,7 @@ func (s *Server) putJournal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.SaveJournal(day, in.Body); err != nil {
-		s.fail(w, err)
+		s.storeErr(w, err)
 		return
 	}
 	e, _ := s.st.Journal(day)
@@ -527,7 +551,12 @@ func matches(hay, tags string, terms []string) bool {
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
-	terms := strings.Fields(fold(r.URL.Query().Get("q")))
+	q := r.URL.Query().Get("q")
+	if len(q) > 200 {
+		writeErr(w, 400, "query is too long (max 200 characters)")
+		return
+	}
+	terms := strings.Fields(fold(q))
 	out := struct {
 		Cards   []cardDTO `json:"cards"`
 		Notes   []noteDTO `json:"notes"`
@@ -573,6 +602,10 @@ func (s *Server) summary(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validDate(from) || !validDate(to) || from > to {
 		writeErr(w, 400, "from/to must be YYYY-MM-DD dates in order")
+		return
+	}
+	if a, _ := time.Parse("2006-01-02", from); a.AddDate(1, 0, 1).Before(mustDate(to)) {
+		writeErr(w, 400, "the period cannot be longer than one year")
 		return
 	}
 	sm, err := s.st.Summarize(from, to)

@@ -71,9 +71,9 @@ func (s *Store) AddNote(body string, color int) (Note, error) {
 
 // AddNoteFull creates a note from n (title, tags, body, color).
 func (s *Store) AddNoteFull(n Note) (Note, error) {
-	n.Body = strings.TrimRight(n.Body, " \n")
-	n.Title = strings.TrimSpace(n.Title)
-	n.Tags = NormTags(n.Tags)
+	if err := cleanNote(&n); err != nil {
+		return Note{}, err
+	}
 	if strings.TrimSpace(n.Body) == "" && n.Title == "" {
 		return Note{}, fmt.Errorf("note is empty")
 	}
@@ -89,6 +89,9 @@ func (s *Store) AddNoteFull(n Note) (Note, error) {
 
 // UpdateNote saves title, tags, body, color, pin and reminder date, and marks the note as edited now.
 func (s *Store) UpdateNote(n Note) error {
+	if err := cleanNote(&n); err != nil {
+		return err
+	}
 	if strings.TrimSpace(n.Body) == "" && strings.TrimSpace(n.Title) == "" {
 		return fmt.Errorf("note is empty")
 	}
@@ -124,3 +127,23 @@ func (s *Store) NotesDue(today string) int {
 	s.db.QueryRow(`SELECT COUNT(*) FROM notes WHERE due != '' AND due <= ?`, today).Scan(&n)
 	return n
 }
+
+// cleanNote makes a note safe: single-line title and tags, multi-line body, sane color and sizes.
+func cleanNote(n *Note) error {
+	n.Title = CleanLine(n.Title)
+	n.Tags = NormTags(CleanLine(n.Tags))
+	n.Body = strings.TrimRight(CleanText(n.Body), " \n")
+	if n.Color < 0 || n.Color > MaxColor {
+		n.Color = 0
+	}
+	if err := tooLong("title", n.Title, MaxLine); err != nil {
+		return err
+	}
+	if err := tooLong("tags", n.Tags, MaxLine); err != nil {
+		return err
+	}
+	return tooLong("note", n.Body, MaxText)
+}
+
+// MaxColor is the highest note color index accepted (the UI wraps it into the palette).
+const MaxColor = 63

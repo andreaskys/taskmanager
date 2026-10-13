@@ -17,7 +17,13 @@ type Attachment struct {
 
 // AddAttachment attaches a URL or file path; the label defaults to the file name or the URL.
 func (s *Store) AddAttachment(kind string, ownerID int64, target, label string) (Attachment, error) {
-	target = strings.TrimSpace(target)
+	target, label = CleanLine(target), CleanLine(label)
+	if err := tooLong("attachment", target, 2000); err != nil {
+		return Attachment{}, err
+	}
+	if err := tooLong("label", label, MaxLine); err != nil {
+		return Attachment{}, err
+	}
 	if target == "" {
 		return Attachment{}, fmt.Errorf("attachment is empty")
 	}

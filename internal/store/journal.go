@@ -26,7 +26,10 @@ func (s *Store) Journal(day string) (JournalEntry, bool) {
 
 // SaveJournal writes the text of a day; an empty text removes the entry.
 func (s *Store) SaveJournal(day, body string) error {
-	body = strings.TrimRight(body, " \n")
+	body = strings.TrimRight(CleanText(body), " \n")
+	if err := tooLong("diary entry", body, MaxText); err != nil {
+		return err
+	}
 	if strings.TrimSpace(body) == "" {
 		_, err := s.db.Exec(`DELETE FROM journal WHERE day=?`, day)
 		return err

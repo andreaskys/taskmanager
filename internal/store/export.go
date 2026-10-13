@@ -244,6 +244,11 @@ func (s *Store) Import(e Export) (boards, cards int, err error) {
 			}
 			cid, _ := res.LastInsertId()
 			for pi, k := range ec.Cards {
+				c := Card{Title: k.Title, Project: k.Project, Description: k.Description, Tags: k.Tags}
+				if err := cleanCard(&c); err != nil {
+					return 0, 0, err
+				}
+				k.Title, k.Project, k.Description, k.Tags = c.Title, c.Project, c.Description, c.Tags
 				created := k.CreatedAt
 				if created == "" {
 					created = now()
@@ -257,6 +262,11 @@ func (s *Store) Import(e Export) (boards, cards int, err error) {
 		}
 	}
 	for _, n := range e.Notes { // notes are added too; the sheet is small and duplicates are easy to delete
+		nn := Note{Title: n.Title, Tags: n.Tags, Body: n.Body, Color: n.Color}
+		if err := cleanNote(&nn); err != nil {
+			return 0, 0, err
+		}
+		n.Title, n.Tags, n.Body, n.Color = nn.Title, nn.Tags, nn.Body, nn.Color
 		created, updated := n.CreatedAt, n.UpdatedAt
 		if created == "" {
 			created = now()
@@ -270,6 +280,10 @@ func (s *Store) Import(e Export) (boards, cards int, err error) {
 		}
 	}
 	for _, d := range e.Journal { // never overwrite a day that already has text
+		d.Body = CleanText(d.Body)
+		if err := tooLong("diary entry", d.Body, MaxText); err != nil {
+			return 0, 0, err
+		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO journal(day, body, updated_at) VALUES(?,?,?)`, d.Day, d.Body, now()); err != nil {
 			return 0, 0, err
 		}

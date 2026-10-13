@@ -129,7 +129,7 @@ func (m *Model) updateNotes(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "c": // next color
 		if cur != nil {
 			n := *cur
-			n.Color = (n.Color + 1) % len(th.Projects)
+			n.Color = wrapIdx(n.Color+1, len(th.Projects))
 			m.editNote(*cur, n)
 		}
 	case "p": // pin / unpin
@@ -346,7 +346,7 @@ func (m *Model) viewNotes(base string) string {
 				}
 				title += fmt.Sprintf("📎%d", c)
 			}
-			border := th.Projects[n.Color%len(th.Projects)]
+			border := th.Projects[wrapIdx(n.Color, len(th.Projects))]
 			if n.Due != "" && n.Due <= todayStr() {
 				border = th.Err
 			}
@@ -402,4 +402,12 @@ func (m *Model) viewNoteEdit(base string) string {
 		title = "Edit note"
 	}
 	return m.center(base, drawBox(title, lines, W, H, th.Accent))
+}
+
+// wrapIdx maps any integer (even a negative one coming from outside) into 0..n-1.
+func wrapIdx(i, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return ((i % n) + n) % n
 }

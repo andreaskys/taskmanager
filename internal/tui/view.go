@@ -348,14 +348,11 @@ func (m *Model) viewBoards() string {
 
 // projectColor gives each project a stable color so cards are scannable.
 func projectColor(name string) color.Color {
-	h := 0
+	var h uint32 // unsigned: the hash may wrap around freely and can never give a negative index
 	for _, r := range fold(name) {
-		h = h*31 + int(r)
+		h = h*31 + uint32(r)
 	}
-	if h < 0 {
-		h = -h
-	}
-	return th.Projects[h%len(th.Projects)]
+	return th.Projects[h%uint32(len(th.Projects))]
 }
 
 // emptyColumnHint fills an empty column: the selected one (and the whole first-run board) say what

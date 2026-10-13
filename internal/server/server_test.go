@@ -278,3 +278,54 @@ func TestTokenFile(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestAPIRefusesEscapesBadColorsAndHugeInputs(t *testing.T) {
+	s, st := newTest(t)
+	b, _ := st.CreateBoard("W")
+	cols, _ := st.Columns(b.ID)
+
+	// terminal escape sequences sent through the API never reach the database
+	var c cardDTO
+	rec := call(t, s, "POST", "/api/cards", `{"column_id":`+itoa(cols[0].ID)+`,"title":"hi\u001b]0;pwned\u0007\u001b[2J","project":"p\u001b[31m","description":"d\u009b2J"}`, &c)
+	if rec.Code != 201 || strings.ContainsAny(c.Title+c.Project+c.Description, "\x1b\x07\x9b") {
+		t.Fatalf("escape sequences must be stripped: %d %+v", rec.Code, c)
+	}
+	var j dayDTO
+	call(t, s, "PUT", "/api/journal/2026-01-01", `{"body":"x\u001b[2Jy"}`, &j)
+	if strings.Contains(j.Body, "\x1b") {
+		t.Fatalf("diary kept an escape: %q", j.Body)
+	}
+
+	// a color outside the palette (negative used to crash the terminal app) is refused
+	for _, body := range []string{`{"title":"n","color":-1}`, `{"title":"n","color":64}`, `{"title":"n","color":9999999999}`} {
+		if rec := call(t, s, "POST", "/api/notes", body, nil); rec.Code != 400 {
+			t.Fatalf("%s: status %d, want 400", body, rec.Code)
+		}
+	}
+	var n noteDTO
+	call(t, s, "POST", "/api/notes", `{"title":"ok","color":7}`, &n)
+	if rec := call(t, s, "PUT", "/api/notes/"+itoa(n.ID), `{"title":"ok","color":-3}`, nil); rec.Code != 400 {
+		t.Fatalf("update with a bad color: %d", rec.Code)
+	}
+
+	// size limits answer 400, not 500
+	long := strings.Repeat("a", store.MaxLine+1)
+	if rec := call(t, s, "PATCH", "/api/cards/"+itoa(c.ID), `{"title":"`+long+`"}`, nil); rec.Code != 400 {
+		t.Fatalf("long title on patch: %d", rec.Code)
+	}
+	if rec := call(t, s, "POST", "/api/cards", `{"column_id":`+itoa(cols[0].ID)+`,"title":"`+long+`"}`, nil); rec.Code != 400 {
+		t.Fatalf("long title on create: %d", rec.Code)
+	}
+	if rec := call(t, s, "PUT", "/api/journal/2026-01-02", `{"body":"`+strings.Repeat("a", store.MaxText+1)+`"}`, nil); rec.Code != 400 {
+		t.Fatalf("long diary entry: %d", rec.Code)
+	}
+	if rec := call(t, s, "GET", "/api/search?q="+strings.Repeat("a", 201), "", nil); rec.Code != 400 {
+		t.Fatalf("long search query: %d", rec.Code)
+	}
+	if rec := call(t, s, "GET", "/api/summary?from=2000-01-01&to=2030-01-01", "", nil); rec.Code != 400 {
+		t.Fatalf("a multi-year summary range must be refused: %d", rec.Code)
+	}
+	if rec := call(t, s, "GET", "/api/summary?from=2026-01-01&to=2026-12-31", "", nil); rec.Code != 200 {
+		t.Fatalf("a one-year range is fine: %d", rec.Code)
+	}
+}

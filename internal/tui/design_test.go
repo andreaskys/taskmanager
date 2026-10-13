@@ -181,3 +181,62 @@ func TestExtraThemesExistAndRender(t *testing.T) {
 		}
 	}
 }
+
+// Data that comes from outside (the phone API, an import) must never be able to crash or garble the UI.
+func TestRenderSurvivesHostileDataAndTinyTerminals(t *testing.T) {
+	m := newModelWithCard(t)
+	c := *m.current()
+	c.Due = "9999-12-31"
+	m.st.UpdateCard(c)
+	n, _ := m.st.AddNoteFull(store.Note{Title: "n", Body: "b"})
+	n.Color = -7 // what the phone API used to be able to store
+	m.st.ApplyNote(n)
+	m.st.AddCardWith(store.Card{ColumnID: m.columns[0].ID, Title: "far past", Due: "0001-01-01"})
+	m.reload()
+	for _, size := range [][2]int{{1, 1}, {10, 4}, {20, 6}, {40, 12}, {80, 24}, {300, 90}} {
+		m.width, m.height = size[0], size[1]
+		for _, md := range []mode{modeBoard, modeToday, modeNotes, modeJournal, modeSummary, modeProjects, modeColumns, modeHelp, modeSearch, modeDetail} {
+			m.mode = md
+			switch md {
+			case modeNotes:
+				m.loadNotes()
+			case modeJournal:
+				m.openJournal("")
+			case modeSummary:
+				m.openSummary()
+			case modeProjects:
+				m.openProjects()
+			case modeColumns:
+				m.openColumns()
+			case modeSearch:
+				m.mode = modeBoard
+				m.openSearch()
+			case modeHelp:
+				m.helpBack = modeBoard
+			case modeToday:
+				m.loadToday()
+			}
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("render panicked at %dx%d in mode %v: %v", size[0], size[1], md, r)
+					}
+				}()
+				m.render()
+			}()
+			m.mode = modeBoard
+		}
+	}
+	if wrapIdx(-7, 6) != 5 || wrapIdx(13, 6) != 1 || wrapIdx(3, 0) != 0 {
+		t.Fatal("wrapIdx must map any integer into the palette")
+	}
+}
+
+func TestProjectColorIsStableAndNeverOutOfRange(t *testing.T) {
+	long := strings.Repeat("Projeto Muito Longo ", 200) // enough to wrap a signed hash many times
+	for _, name := range []string{"", "a", "Acme", long, strings.Repeat("\U0010ffff", 5000)} {
+		if projectColor(name) == nil || projectColor(name) != projectColor(name) {
+			t.Fatalf("projectColor(%.20q) must be stable and defined", name)
+		}
+	}
+}
